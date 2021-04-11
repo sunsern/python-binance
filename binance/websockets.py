@@ -84,9 +84,9 @@ class BinanceSocketManager(threading.Thread):
         self._conns = {}
         self._client = client
         self._user_timeout = user_timeout
-        self._timers = {'user': None, 'margin': None}
-        self._listen_keys = {'user': None, 'margin': None}
-        self._account_callbacks = {'user': None, 'margin': None}
+        self._timers = {'user': None, 'margin': None, 'futures': None}
+        self._listen_keys = {'user': None, 'margin': None, 'futures': None}
+        self._account_callbacks = {'user': None, 'margin': None, 'futures': None}
         # Isolated margin sockets will be opened under the 'symbol' name
 
     def _start_socket(self, path, callback, prefix='ws/'):
@@ -241,6 +241,10 @@ class BinanceSocketManager(threading.Thread):
         """
         socket_name = '{}@kline_{}'.format(symbol.lower(), interval)
         return self._start_socket(socket_name, callback)
+
+    def start_futures_kline_socket(self, symbol, callback, interval=Client.KLINE_INTERVAL_1MINUTE):
+        socket_name = '{}@kline_{}'.format(symbol.lower(), interval)
+        return self._start_futures_socket(socket_name, callback)
 
     def start_miniticker_socket(self, callback, update_time=1000):
         """Start a miniticker websocket for all trades
@@ -662,6 +666,12 @@ class BinanceSocketManager(threading.Thread):
         # and start the socket with this specific key
         return self._start_account_socket('user', user_listen_key, callback)
 
+    def start_futures_user_socket(self, callback):
+        # Get the user listen key
+        user_listen_key = self._client.futures_get_listen_key()
+        # and start the socket with this specific key
+        return self._start_account_socket('futures', user_listen_key, callback)
+
     def start_margin_socket(self, callback):
         """Start a websocket for cross-margin data
 
@@ -703,7 +713,10 @@ class BinanceSocketManager(threading.Thread):
         self._check_account_socket_open(listen_key)
         self._listen_keys[socket_type] = listen_key
         self._account_callbacks[socket_type] = callback
-        conn_key = self._start_socket(listen_key, callback)
+        if socket_type == 'futures':
+            conn_key = self._start_futures_socket(listen_key, callback, prefix='ws/')
+        else:
+            conn_key = self._start_socket(listen_key, callback)
         if conn_key:
             # start timer to keep socket alive
             self._start_socket_timer(socket_type)
@@ -731,6 +744,10 @@ class BinanceSocketManager(threading.Thread):
             listen_key = listen_key_func()
         elif socket_type == 'margin':  # cross-margin
             listen_key_func = self._client.margin_stream_get_listen_key
+            callback = self._account_callbacks[socket_type]
+            listen_key = listen_key_func()
+        elif socket_type == 'futures':  # futures
+            listen_key_func = self._client.futures_get_listen_key
             callback = self._account_callbacks[socket_type]
             listen_key = listen_key_func()
         else:  # isolated margin
